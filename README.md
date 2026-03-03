@@ -2,13 +2,13 @@
 
 GMT is our KG-LLM fusion method that represents local graph structure as explicit memory and injects it into multiple Transformer layers via cross-attention. This enables deep, token-wise evidence retrieval during generation rather than shallow prefix concatenation.
 
-## Key ideas
+## 🚀 Key ideas
 - Graph-as-Memory: compress a local subgraph into a fixed number of memory tokens.
 - SGM (Semantic Graph Module): relation-centric message passing to extract semantic evidence.
 - Memory Cross-Attention: fuse graph memory into multiple Transformer layers.
 - Efficient adaptation: apply LoRA only to memory cross-attention, keep the base LLM frozen.
 
-## Repository layout
+## 🗂️ Repository layout
 - `gmt_model.py`: GMT model components (SGM, memory encoder, cross-attn integration).
 - `graph_data.py`: KG indexing and data loading utilities.
 - `pretrain_gmt.py`: Stage 1 SGM pretraining.
@@ -20,7 +20,7 @@ GMT is our KG-LLM fusion method that represents local graph structure as explici
 - `kg/`: OpenKE-style KG files.
 - `templates/`, `utils/`: prompt templates and helpers.
 
-## Requirements
+## ⚙️ Requirements
 Recommended: Python 3.9+.
 
 Core dependencies:
@@ -32,11 +32,11 @@ Core dependencies:
 Optional:
 - `sentence-transformers` (only for `build_rel_semantics.py`)
 
-## Model support
+## 🧠 Model support
 - Current implementation is LLaMA-specific (`LlamaForCausalLM` and LLaMA decoder internals).
 - `--base_model` should point to a LLaMA-compatible checkpoint.
 
-## Data format
+## 📦 Data format
 Training and inference JSON or JSONL files must include:
 - `instruction` (string)
 - `input` (string)
@@ -55,7 +55,7 @@ Example:
 
 `embedding_ids` must be consistent with `kg/<dataset>/entity2id.txt` and `relation2id.txt`.
 
-## KG format (OpenKE style)
+## 🕸️ KG format (OpenKE style)
 Expected files under `kg/<dataset>/`:
 - `entity2id.txt`
 - `relation2id.txt`
@@ -66,7 +66,7 @@ By default, `train2id.txt` uses `head tail relation` ordering. Use `--triple_for
 If your relations are directional, use `--add_inverse` when building the KG index.
 Without `--add_inverse`, the loader still adds both head and tail adjacency entries with the same relation id for neighborhood retrieval.
 
-## Relation semantics
+## 🔗 Relation semantics
 GMT uses relation semantic vectors for SGM:
 - Provide a tensor file via `--rel_semantic_path` (shape `[num_relations, dim]`).
 - If missing, it falls back to random vectors.
@@ -81,7 +81,7 @@ python build_rel_semantics.py \
 ```
 This requires `sentence-transformers` and will download a model if not cached.
 
-## Stage 1: SGM pretraining
+## 1️⃣ Stage 1: SGM pretraining
 Example (CoDeX-S):
 ```bash
 python pretrain_gmt.py \
@@ -97,7 +97,7 @@ Outputs:
 - `checkpoints/sgm_codex/sgm_state.pth`
 - `checkpoints/sgm_codex/sgm_config.json`
 
-## Stage 2: Memory-augmented LLM finetuning
+## 2️⃣ Stage 2: Memory-augmented LLM finetuning
 Example (CoDeX-S):
 ```bash
 python finetune_gmt.py \
@@ -129,7 +129,7 @@ Outputs:
 - `checkpoints/gmt_codex/memory_attn.pth`
 - `checkpoints/gmt_codex/gmt_config.json`
 
-## Inference
+## 🔍 Inference
 Classification:
 ```bash
 python inference_gmt.py \
@@ -156,7 +156,7 @@ Additional inference options:
 - `--max_eval` limits the number of evaluated samples.
 - `--mask_query` uses the same masking behavior as training.
 
-## Checkpoints and reuse
+## 💾 Checkpoints and reuse
 Finetuning saves:
 - `graph_encoder.pth` (SGM + memory tokenizer + projection)
 - `memory_attn.pth` (memory cross-attention and gates)
@@ -165,10 +165,10 @@ Finetuning saves:
 Inference loads these files and reconstructs the GMT model on top of the base LLM.
 Checkpoint loading now validates expected key sets for memory modules to avoid silent partial loads.
 
-## Tips
+## 💡 Tips
 - Ensure `embedding_ids` align with the KG ID mappings used in `kg/<dataset>/`.
 - For new datasets, verify triple ordering and pass `--triple_format` if needed.
 - If results are unstable, start by fixing `--seed` in `pretrain_gmt.py` and reducing `--top_k`.
 
-## License
+## 📄 License
 See `LICENSE`.
