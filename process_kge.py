@@ -4,7 +4,7 @@ import torch
 def load_pretrain_kge(path):
     if "complex" in path:
         return load_complex_model(path)
-    kge_model = torch.load(path)
+    kge_model = torch.load(path, map_location="cpu")
     ent_embs = torch.tensor(kge_model["ent_embeddings.weight"]).cpu()
     rel_embs = torch.tensor(kge_model["rel_embeddings.weight"]).cpu()
     ent_embs.requires_grad = False
@@ -20,7 +20,7 @@ def load_pretrain_kge(path):
 
 
 def load_complex_model(path):
-    kge_model = torch.load(path)
+    kge_model = torch.load(path, map_location="cpu")
     ent_embs1 = torch.tensor(kge_model["ent_re_embeddings.weight"]).cpu()
     ent_embs2 = torch.tensor(kge_model["ent_im_embeddings.weight"]).cpu()
     rel_embs1 = torch.tensor(kge_model["rel_re_embeddings.weight"]).cpu()

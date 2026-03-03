@@ -61,6 +61,17 @@ def parse_layers(value: str, one_based: bool):
     return layers
 
 
+def validate_memory_layers(layers: list, num_layers: int) -> list:
+    if len(set(layers)) != len(layers):
+        raise ValueError(f"memory_layers contains duplicates: {layers}")
+    invalid = [v for v in layers if v < 0 or v >= num_layers]
+    if invalid:
+        raise ValueError(
+            f"memory_layers out of range for model with {num_layers} layers: {invalid}"
+        )
+    return layers
+
+
 def load_config(gmt_dir: str):
     config_path = os.path.join(gmt_dir, "gmt_config.json")
     if os.path.exists(config_path):
@@ -83,6 +94,7 @@ def load_dataset(path: str):
         return json.load(f)
 
 
+@torch.inference_mode()
 def greedy_generate(
     model,
     input_ids,
@@ -262,9 +274,7 @@ def main():
     memory_layers_1based = args.memory_layers_1based or config.get(
         "memory_layers_1based", False
     )
-    memory_layers = parse_layers(
-        memory_layers_arg, one_based=memory_layers_1based
-    )
+    memory_layers = parse_layers(memory_layers_arg, one_based=memory_layers_1based)
     kg_index = load_kg_index(
         kg_dir=args.kg_dir,
         triple_file=args.triple_file,
@@ -281,6 +291,18 @@ def main():
     base_model = LlamaForCausalLM.from_pretrained(
         args.base_model, torch_dtype=torch.float16
     ).to(device)
+    if memory_layers:
+        memory_layers = validate_memory_layers(
+            memory_layers, base_model.config.num_hidden_layers
+        )
+        effective_memory_layers = memory_layers
+    else:
+        effective_memory_layers = list(
+            range(
+                max(base_model.config.num_hidden_layers - 8, 0),
+                base_model.config.num_hidden_layers,
+            )
+        )
     tokenizer = LlamaTokenizer.from_pretrained(args.base_model)
     tokenizer.pad_token_id = 0
     tokenizer.padding_side = "left"
@@ -300,14 +322,7 @@ def main():
     model = GMTForCausalLM(
         base_model=base_model,
         graph_encoder=graph_encoder,
-        memory_layers=memory_layers
-        if memory_layers
-        else list(
-            range(
-                max(base_model.config.num_hidden_layers - 8, 0),
-                base_model.config.num_hidden_layers,
-            )
-        ),
+        memory_layers=effective_memory_layers,
         lora_r=config.get("lora_r", 64),
         lora_alpha=config.get("lora_alpha", 128),
         lora_dropout=config.get("lora_dropout", 0.01),
@@ -319,11 +334,21 @@ def main():
         os.path.join(args.gmt_dir, "graph_encoder.pth"),
         map_location="cpu",
     )
-    model.graph_encoder.load_state_dict(graph_state, strict=False)
+    model.graph_encoder.load_state_dict(graph_state, strict=True)
     memory_state = torch.load(
         os.path.join(args.gmt_dir, "memory_attn.pth"),
         map_location="cpu",
     )
+    expected_memory_keys = set(model.get_memory_state_dict().keys())
+    loaded_memory_keys = set(memory_state.keys())
+    missing_memory_keys = sorted(expected_memory_keys - loaded_memory_keys)
+    unexpected_memory_keys = sorted(loaded_memory_keys - expected_memory_keys)
+    if missing_memory_keys or unexpected_memory_keys:
+        raise RuntimeError(
+            "Memory checkpoint keys mismatch. "
+            f"missing={missing_memory_keys[:10]} "
+            f"unexpected={unexpected_memory_keys[:10]}"
+        )
     model.load_state_dict(memory_state, strict=False)
     model.align_memory_devices()
     model.eval()
@@ -344,6 +369,7 @@ def main():
         embedding_ids = torch.tensor(
             data["embedding_ids"], dtype=torch.long
         ).unsqueeze(0).to(device)
+        prompt_len = input_ids.size(-1)
         gen_ids = greedy_generate(
             model,
             input_ids,
@@ -352,9 +378,8 @@ def main():
             args.max_new_tokens,
         )
         response = tokenizer.decode(
-            gen_ids[0], skip_special_tokens=True
-        )
-        response = response.replace(prompt, "").strip()
+            gen_ids[0, prompt_len:], skip_special_tokens=True
+        ).strip()
         results.append({"data": data, "predict": response})
         print(response)
     task = args.task

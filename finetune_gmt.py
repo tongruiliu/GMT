@@ -27,6 +27,48 @@ def parse_layers(value: str, one_based: bool) -> List[int]:
     return layers
 
 
+def validate_memory_layers(layers: List[int], num_layers: int) -> List[int]:
+    if len(set(layers)) != len(layers):
+        raise ValueError(f"memory_layers contains duplicates: {layers}")
+    invalid = [v for v in layers if v < 0 or v >= num_layers]
+    if invalid:
+        raise ValueError(
+            f"memory_layers out of range for model with {num_layers} layers: {invalid}"
+        )
+    return layers
+
+
+def compute_gradient_accumulation_steps(
+    batch_size: int, micro_batch_size: int, world_size: int
+) -> int:
+    if batch_size <= 0 or micro_batch_size <= 0:
+        raise ValueError("batch_size and micro_batch_size must be positive")
+    if batch_size < micro_batch_size:
+        raise ValueError(
+            "batch_size must be >= micro_batch_size "
+            f"(got {batch_size} < {micro_batch_size})"
+        )
+    if batch_size % micro_batch_size != 0:
+        raise ValueError(
+            "batch_size must be divisible by micro_batch_size "
+            f"(got {batch_size} and {micro_batch_size})"
+        )
+    steps = batch_size // micro_batch_size
+    if world_size > 1:
+        if steps < world_size:
+            raise ValueError(
+                "batch_size / micro_batch_size must be >= WORLD_SIZE "
+                f"(got {steps} < {world_size})"
+            )
+        if steps % world_size != 0:
+            raise ValueError(
+                "(batch_size / micro_batch_size) must be divisible by WORLD_SIZE "
+                f"(got {steps} and {world_size})"
+            )
+        steps = steps // world_size
+    return max(1, steps)
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Finetune GMT (Stage 2)")
     parser.add_argument("--base_model", type=str, required=True)
@@ -74,14 +116,15 @@ def main():
     args = parse_args()
     if int(os.environ.get("LOCAL_RANK", 0)) == 0:
         print(json.dumps(vars(args), indent=2))
-    gradient_accumulation_steps = args.batch_size // args.micro_batch_size
     prompter = Prompter(args.prompt_template_name)
     device_map = "auto"
     world_size = int(os.environ.get("WORLD_SIZE", 1))
     ddp = world_size != 1
+    gradient_accumulation_steps = compute_gradient_accumulation_steps(
+        args.batch_size, args.micro_batch_size, world_size
+    )
     if ddp:
         device_map = {"": int(os.environ.get("LOCAL_RANK") or 0)}
-        gradient_accumulation_steps = gradient_accumulation_steps // world_size
     base_model = LlamaForCausalLM.from_pretrained(
         args.base_model,
         torch_dtype=torch.float16,
@@ -170,6 +213,7 @@ def main():
         memory_layers = parse_layers(
             args.memory_layers, one_based=args.memory_layers_1based
         )
+        memory_layers = validate_memory_layers(memory_layers, num_layers)
         memory_layers_str = args.memory_layers
         memory_layers_1based = args.memory_layers_1based
     else:

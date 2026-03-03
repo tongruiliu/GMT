@@ -32,6 +32,10 @@ Core dependencies:
 Optional:
 - `sentence-transformers` (only for `build_rel_semantics.py`)
 
+## Model support
+- Current implementation is LLaMA-specific (`LlamaForCausalLM` and LLaMA decoder internals).
+- `--base_model` should point to a LLaMA-compatible checkpoint.
+
 ## Data format
 Training and inference JSON or JSONL files must include:
 - `instruction` (string)
@@ -60,6 +64,7 @@ Expected files under `kg/<dataset>/`:
 By default, `train2id.txt` uses `head tail relation` ordering. Use `--triple_format` to change this (for example, `htr` or `hrt`).
 
 If your relations are directional, use `--add_inverse` when building the KG index.
+Without `--add_inverse`, the loader still adds both head and tail adjacency entries with the same relation id for neighborhood retrieval.
 
 ## Relation semantics
 GMT uses relation semantic vectors for SGM:
@@ -115,6 +120,9 @@ Notes:
 - `--mask_query` removes the query triple from its local neighborhood.
 - `--train_graph_module` allows SGM finetuning during Stage 2 (disabled by default).
 - `--train_cross_attn_base` enables training the base cross-attention weights in addition to LoRA.
+- Effective global batch follows:
+  `batch_size = micro_batch_size * gradient_accumulation_steps * WORLD_SIZE`.
+- For current script checks, `batch_size` must be divisible by `micro_batch_size`, and `(batch_size / micro_batch_size)` must be divisible by `WORLD_SIZE` in DDP.
 
 Outputs:
 - `checkpoints/gmt_codex/graph_encoder.pth`
@@ -155,6 +163,7 @@ Finetuning saves:
 - `gmt_config.json` (all run arguments)
 
 Inference loads these files and reconstructs the GMT model on top of the base LLM.
+Checkpoint loading now validates expected key sets for memory modules to avoid silent partial loads.
 
 ## Tips
 - Ensure `embedding_ids` align with the KG ID mappings used in `kg/<dataset>/`.
